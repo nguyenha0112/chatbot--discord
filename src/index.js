@@ -15,6 +15,7 @@ const {
   createAudioPlayer,
   createAudioResource,
   entersState,
+  generateDependencyReport,
   getVoiceConnection,
   joinVoiceChannel,
   VoiceConnectionStatus
@@ -48,6 +49,11 @@ const client = new Client({
 
 const voiceSessions = new Map();
 
+function voiceStatusName(status) {
+  return Object.entries(VoiceConnectionStatus)
+    .find(([, value]) => value === status)?.[0] || status;
+}
+
 const commands = [
   new SlashCommandBuilder()
     .setName("join")
@@ -59,6 +65,7 @@ const commands = [
 
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`Bot da dang nhap: ${readyClient.user.tag}`);
+  console.log(generateDependencyReport());
 
   try {
     if (clientId) {
@@ -95,9 +102,37 @@ client.on(Events.InteractionCreate, async (interaction) => {
     await interaction.deferReply();
 
     const voiceChannel = interaction.member?.voice?.channel;
+    console.log("Nhan lenh /join", {
+      guild: interaction.guild.name,
+      user: interaction.user.tag,
+      textChannelId: interaction.channelId,
+      voiceChannelId: voiceChannel?.id,
+      voiceChannelName: voiceChannel?.name,
+      voiceChannelType: voiceChannel?.type
+    });
 
     if (!voiceChannel) {
       await interaction.editReply("Ban can vao voice channel truoc, roi go `/join`.");
+      return;
+    }
+
+    const botMember = await interaction.guild.members.fetchMe();
+    const permissions = voiceChannel.permissionsFor(botMember);
+    const canView = permissions?.has("ViewChannel");
+    const canConnect = permissions?.has("Connect");
+    const canSpeak = permissions?.has("Speak");
+
+    console.log("Quyen voice cua bot", {
+      canView,
+      canConnect,
+      canSpeak,
+      permissions: permissions?.toArray()
+    });
+
+    if (!canView || !canConnect || !canSpeak) {
+      await interaction.editReply(
+        `Bot thieu quyen trong voice channel nay: View=${canView}, Connect=${canConnect}, Speak=${canSpeak}.`
+      );
       return;
     }
 
@@ -106,6 +141,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
       guildId: interaction.guild.id,
       adapterCreator: interaction.guild.voiceAdapterCreator,
       selfDeaf: false
+    });
+
+    connection.on("stateChange", (oldState, newState) => {
+      console.log("Voice state change", {
+        from: voiceStatusName(oldState.status),
+        to: voiceStatusName(newState.status),
+        guild: interaction.guild.name,
+        channel: voiceChannel.name
+      });
+    });
+
+    connection.on("error", (error) => {
+      console.error("Voice connection error:", error);
     });
 
     const player = createAudioPlayer();
@@ -129,15 +177,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     try {
       await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+      console.log("Voice connection ready", {
+        guild: interaction.guild.name,
+        channel: voiceChannel.name
+      });
       await interaction.editReply(
         `Da vao voice channel **${voiceChannel.name}**. Minh se doc tin nhan trong kenh nay.`
       );
       enqueueSpeech(session, "Bot da san sang doc tin nhan.");
     } catch (error) {
+      console.error("Khong vao duoc voice channel:", error);
       connection.destroy();
       voiceSessions.delete(interaction.guild.id);
       await interaction.editReply(
-        "Khong vao duoc voice channel. Kiem tra quyen Connect/Speak cua bot."
+        `Khong vao duoc voice channel: ${error.message || error}.`
       );
     }
   }
