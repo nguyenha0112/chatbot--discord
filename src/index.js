@@ -194,7 +194,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
       player,
       textChannelId: interaction.channelId,
       queue: [],
-      playing: false
+      playing: false,
+      ready: false
     };
 
     player.on("stateChange", (oldState, newState) => {
@@ -215,12 +216,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     try {
       await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+      session.ready = true;
       console.log("Voice connection ready", {
         guild: interaction.guild.name,
         channel: voiceChannel.name
       });
     } catch (error) {
-      console.error("Voice chua bao Ready kip thoi, van giu ket noi de thu phat audio:", error);
+      console.error("Voice chua bao Ready kip thoi, khong the phat audio:", error);
+      await interaction.editReply(
+        [
+          `Bot co vao **${voiceChannel.name}** nhung voice connection chua Ready nen Discord se khong nghe duoc am thanh.`,
+          "Thu doi Region cua voice channel sang Singapore/Hong Kong/Japan hoac cap nhat Node.js len ban 22 LTS roi chay lai."
+        ].join("\n")
+      );
+      return;
     }
 
     await interaction.editReply(
@@ -336,6 +345,13 @@ function enqueueBeep(session) {
 
 async function playNextSpeech(session) {
   if (session.playing || session.queue.length === 0) return;
+
+  if (session.connection.state.status !== VoiceConnectionStatus.Ready) {
+    console.error("Bo qua audio vi voice connection chua Ready:", {
+      status: voiceStatusName(session.connection.state.status)
+    });
+    return;
+  }
 
   session.playing = true;
   const item = session.queue.shift();
