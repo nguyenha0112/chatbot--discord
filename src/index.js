@@ -53,6 +53,11 @@ function voiceStatusName(status) {
     .find(([, value]) => value === status)?.[0] || status;
 }
 
+function audioStatusName(status) {
+  return Object.entries(AudioPlayerStatus)
+    .find(([, value]) => value === status)?.[0] || status;
+}
+
 const commands = [
   new SlashCommandBuilder()
     .setName("join")
@@ -151,6 +156,24 @@ client.on(Events.InteractionCreate, async (interaction) => {
       });
     });
 
+    connection.on(VoiceConnectionStatus.Disconnected, async (oldState, newState) => {
+      console.log("Voice disconnected", {
+        reason: newState.reason,
+        closeCode: newState.closeCode
+      });
+
+      try {
+        await Promise.race([
+          entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+          entersState(connection, VoiceConnectionStatus.Connecting, 5_000)
+        ]);
+      } catch (error) {
+        console.error("Voice mat ket noi qua lau, dong connection:", error);
+        connection.destroy();
+        voiceSessions.delete(interaction.guild.id);
+      }
+    });
+
     connection.on("error", (error) => {
       console.error("Voice connection error:", error);
     });
@@ -168,6 +191,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       queue: [],
       playing: false
     };
+
+    player.on("stateChange", (oldState, newState) => {
+      console.log("Audio player state change", {
+        from: audioStatusName(oldState.status),
+        to: audioStatusName(newState.status)
+      });
+    });
 
     player.on("error", (error) => {
       console.error("Loi audio player:", error);
@@ -289,7 +319,11 @@ async function playNextSpeech(session) {
   try {
     const wavPath = await createSpeechFile(text);
     console.log("Bat dau doc TTS:", text);
-    const resource = createAudioResource(wavPath);
+    console.log("File TTS:", wavPath, fs.statSync(wavPath).size, "bytes");
+    const resource = createAudioResource(wavPath, {
+      inlineVolume: true
+    });
+    resource.volume?.setVolume(1);
 
     session.player.play(resource);
 
