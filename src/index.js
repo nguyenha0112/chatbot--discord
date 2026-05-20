@@ -11,20 +11,19 @@ const {
 } = require("discord.js");
 const {
   AudioPlayerStatus,
-  StreamType,
   createAudioPlayer,
   createAudioResource,
   entersState,
   generateDependencyReport,
   getVoiceConnection,
   joinVoiceChannel,
+  NoSubscriberBehavior,
   VoiceConnectionStatus
 } = require("@discordjs/voice");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const ffmpegPath = require("ffmpeg-static");
 
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
@@ -156,7 +155,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
       console.error("Voice connection error:", error);
     });
 
-    const player = createAudioPlayer();
+    const player = createAudioPlayer({
+      behaviors: {
+        noSubscriber: NoSubscriberBehavior.Play
+      }
+    });
 
     const session = {
       connection,
@@ -181,18 +184,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
         guild: interaction.guild.name,
         channel: voiceChannel.name
       });
-      await interaction.editReply(
-        `Da vao voice channel **${voiceChannel.name}**. Minh se doc tin nhan trong kenh nay.`
-      );
-      enqueueSpeech(session, "Bot da san sang doc tin nhan.");
     } catch (error) {
-      console.error("Khong vao duoc voice channel:", error);
-      connection.destroy();
-      voiceSessions.delete(interaction.guild.id);
-      await interaction.editReply(
-        `Khong vao duoc voice channel: ${error.message || error}.`
-      );
+      console.error("Voice chua bao Ready kip thoi, van giu ket noi de thu phat audio:", error);
     }
+
+    await interaction.editReply(
+      `Da vao voice channel **${voiceChannel.name}**. Minh se doc tin nhan trong kenh nay.`
+    );
+    enqueueSpeech(session, "Bot da san sang doc tin nhan.");
   }
 
   if (interaction.commandName === "leave") {
@@ -289,35 +288,13 @@ async function playNextSpeech(session) {
 
   try {
     const wavPath = await createSpeechFile(text);
-    const ffmpeg = spawn(ffmpegPath, [
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      "-i",
-      wavPath,
-      "-f",
-      "s16le",
-      "-ar",
-      "48000",
-      "-ac",
-      "2",
-      "pipe:1"
-    ]);
-
-    const resource = createAudioResource(ffmpeg.stdout, {
-      inputType: StreamType.Raw
-    });
+    console.log("Bat dau doc TTS:", text);
+    const resource = createAudioResource(wavPath);
 
     session.player.play(resource);
 
     session.player.once(AudioPlayerStatus.Idle, () => {
-      fs.rm(wavPath, { force: true }, () => {});
-      session.playing = false;
-      void playNextSpeech(session);
-    });
-
-    ffmpeg.once("error", (error) => {
-      console.error("Loi ffmpeg:", error);
+      console.log("Doc TTS xong");
       fs.rm(wavPath, { force: true }, () => {});
       session.playing = false;
       void playNextSpeech(session);
