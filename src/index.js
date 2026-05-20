@@ -91,7 +91,26 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     const oldSession = sessions.get(interaction.guild.id);
-    oldSession?.connection.destroy();
+
+    if (
+      oldSession &&
+      oldSession.connection.state.status !== VoiceConnectionStatus.Destroyed
+    ) {
+      if (oldSession.voiceChannelId !== voiceChannel.id) {
+        await interaction.editReply(
+          `Bot dang doc o voice channel **${oldSession.voiceChannelName}**. Go \`/leave\` truoc neu muon chuyen phong.`
+        );
+        return;
+      }
+
+      oldSession.textChannelId = interaction.channelId;
+      oldSession.queue.length = 0;
+      await interaction.editReply(
+        `Bot da o san **${voiceChannel.name}**. Minh se doc tin nhan trong kenh nay.`
+      );
+      enqueue(oldSession, "Bot da chuyen sang doc kenh nay.");
+      return;
+    }
 
     const connection = joinVoiceChannel({
       channelId: voiceChannel.id,
@@ -133,6 +152,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const session = {
       connection,
       player,
+      voiceChannelId: voiceChannel.id,
+      voiceChannelName: voiceChannel.name,
       textChannelId: interaction.channelId,
       queue: [],
       playing: false
@@ -185,9 +206,13 @@ client.on(Events.MessageCreate, (message) => {
   if (!session) return;
   if (message.channel.id !== session.textChannelId) return;
   if (!message.content.trim()) return;
+  if (session.connection.state.status === VoiceConnectionStatus.Destroyed) {
+    sessions.delete(message.guild.id);
+    return;
+  }
 
   const name = message.member?.displayName || message.author.username;
-  enqueue(session, `${name} nói: ${message.content}`);
+  enqueue(session, `${name} noi: ${message.content}`);
 });
 
 function enqueue(session, text) {
