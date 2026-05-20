@@ -11,6 +11,7 @@ const {
 } = require("discord.js");
 const {
   AudioPlayerStatus,
+  StreamType,
   createAudioPlayer,
   createAudioResource,
   entersState,
@@ -24,6 +25,7 @@ const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const ffmpegPath = require("ffmpeg-static");
 
 const token = process.env.DISCORD_TOKEN;
 const clientId = process.env.DISCORD_CLIENT_ID;
@@ -63,6 +65,9 @@ const commands = [
     .setName("join")
     .setDescription("Cho bot vao voice channel cua ban va doc tin nhan o kenh nay."),
   new SlashCommandBuilder()
+    .setName("beep")
+    .setDescription("Phat tieng bip de kiem tra am thanh voice."),
+  new SlashCommandBuilder()
     .setName("leave")
     .setDescription("Cho bot roi khoi voice channel.")
 ].map((command) => command.toJSON());
@@ -75,14 +80,14 @@ client.once(Events.ClientReady, async (readyClient) => {
     if (clientId) {
       const rest = new REST({ version: "10" }).setToken(token);
       await rest.put(Routes.applicationCommands(clientId), { body: commands });
-      console.log("Da dang ky slash commands: /join, /leave");
+      console.log("Da dang ky slash commands: /join, /beep, /leave");
       return;
     }
 
     await Promise.all(
       readyClient.guilds.cache.map((guild) => guild.commands.set(commands))
     );
-    console.log("Da dang ky slash commands trong cac server hien tai: /join, /leave");
+    console.log("Da dang ky slash commands trong cac server hien tai: /join, /beep, /leave");
   } catch (error) {
     console.error("Khong dang ky duoc slash commands:", error);
   }
@@ -239,6 +244,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
     voiceSessions.delete(interaction.guild.id);
     await interaction.editReply("Da roi khoi voice channel.");
   }
+
+  if (interaction.commandName === "beep") {
+    await interaction.deferReply();
+
+    const session = voiceSessions.get(interaction.guild.id);
+
+    if (!session) {
+      await interaction.editReply("Bot chua o voice channel. Go `/join` truoc.");
+      return;
+    }
+
+    enqueueBeep(session);
+    await interaction.editReply("Dang phat tieng bip kiem tra.");
+  }
 });
 
 client.on(Events.MessageCreate, async (message) => {
@@ -310,20 +329,67 @@ function enqueueSpeech(session, text) {
   void playNextSpeech(session);
 }
 
+function enqueueBeep(session) {
+  session.queue.push({ type: "beep" });
+  void playNextSpeech(session);
+}
+
 async function playNextSpeech(session) {
   if (session.playing || session.queue.length === 0) return;
 
   session.playing = true;
-  const text = session.queue.shift();
+  const item = session.queue.shift();
 
   try {
+    if (typeof item === "object" && item.type === "beep") {
+      console.log("Bat dau phat beep");
+      const ffmpeg = spawn(ffmpegPath, [
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-f",
+        "lavfi",
+        "-i",
+        "sine=frequency=1000:duration=2",
+        "-f",
+        "s16le",
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
+        "pipe:1"
+      ]);
+
+      const resource = createAudioResource(ffmpeg.stdout, {
+        inputType: StreamType.Raw,
+        inlineVolume: true
+      });
+      resource.volume?.setVolume(2);
+
+      session.player.play(resource);
+
+      session.player.once(AudioPlayerStatus.Idle, () => {
+        console.log("Phat beep xong");
+        session.playing = false;
+        void playNextSpeech(session);
+      });
+
+      ffmpeg.once("error", (error) => {
+        console.error("Loi ffmpeg beep:", error);
+        session.playing = false;
+        void playNextSpeech(session);
+      });
+      return;
+    }
+
+    const text = item;
     const wavPath = await createSpeechFile(text);
     console.log("Bat dau doc TTS:", text);
     console.log("File TTS:", wavPath, fs.statSync(wavPath).size, "bytes");
     const resource = createAudioResource(wavPath, {
       inlineVolume: true
     });
-    resource.volume?.setVolume(1);
+    resource.volume?.setVolume(2);
 
     session.player.play(resource);
 
