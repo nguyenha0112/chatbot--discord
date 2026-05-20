@@ -92,13 +92,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand() || !interaction.guild) return;
 
   if (interaction.commandName === "join") {
+    await interaction.deferReply();
+
     const voiceChannel = interaction.member?.voice?.channel;
 
     if (!voiceChannel) {
-      await interaction.reply({
-        content: "Ban can vao voice channel truoc, roi go `/join`.",
-        ephemeral: true
-      });
+      await interaction.editReply("Ban can vao voice channel truoc, roi go `/join`.");
       return;
     }
 
@@ -130,32 +129,33 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
     try {
       await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
-      await interaction.reply(
+      await interaction.editReply(
         `Da vao voice channel **${voiceChannel.name}**. Minh se doc tin nhan trong kenh nay.`
       );
       enqueueSpeech(session, "Bot da san sang doc tin nhan.");
     } catch (error) {
       connection.destroy();
       voiceSessions.delete(interaction.guild.id);
-      await interaction.reply({
-        content: "Khong vao duoc voice channel. Kiem tra quyen Connect/Speak cua bot.",
-        ephemeral: true
-      });
+      await interaction.editReply(
+        "Khong vao duoc voice channel. Kiem tra quyen Connect/Speak cua bot."
+      );
     }
   }
 
   if (interaction.commandName === "leave") {
+    await interaction.deferReply();
+
     const session = voiceSessions.get(interaction.guild.id);
     const connection = session?.connection || getVoiceConnection(interaction.guild.id);
 
     if (!connection) {
-      await interaction.reply({ content: "Bot dang khong o voice channel nao.", ephemeral: true });
+      await interaction.editReply("Bot dang khong o voice channel nao.");
       return;
     }
 
     connection.destroy();
     voiceSessions.delete(interaction.guild.id);
-    await interaction.reply("Da roi khoi voice channel.");
+    await interaction.editReply("Da roi khoi voice channel.");
   }
 });
 
