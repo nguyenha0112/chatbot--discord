@@ -21,6 +21,7 @@ const {
 } = require("@discordjs/voice");
 const googleTTS = require("google-tts-api");
 const { spawn } = require("node:child_process");
+const http = require("node:http");
 const ffmpegPath = require("ffmpeg-static");
 
 const token = process.env.DISCORD_TOKEN;
@@ -186,7 +187,7 @@ client.on(Events.MessageCreate, (message) => {
   if (!message.content.trim()) return;
 
   const name = message.member?.displayName || message.author.username;
-  enqueue(session, `${name} noi: ${message.content}`);
+  enqueue(session, `${name} nói: ${message.content}`);
 });
 
 function enqueue(session, text) {
@@ -261,5 +262,16 @@ async function playNext(session) {
     void playNext(session);
   }
 }
+
+const port = process.env.PORT || 3000;
+
+http
+  .createServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Discord Vietnamese TTS bot is running");
+  })
+  .listen(port, () => {
+    console.log(`Health server listening on port ${port}`);
+  });
 
 client.login(token);
