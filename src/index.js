@@ -261,20 +261,19 @@ async function playNext(session) {
   try {
     console.log("Doc:", text);
 
-    const url = googleTTS.getAudioUrl(text, {
+    const base64Audio = await googleTTS.getAudioBase64(text, {
       lang: "vi",
       slow: false,
       host: "https://translate.google.com"
     });
+    
+    const audioBuffer = Buffer.from(base64Audio, "base64");
 
     const ffmpeg = spawn(ffmpegPath, [
       "-hide_banner",
       "-loglevel",
       "error",
-      "-user_agent",
-      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-      "-i",
-      url,
+      "-i", "pipe:0",
       "-c:a", "libopus",
       "-b:a", "48k",
       "-ac", "2",
@@ -282,6 +281,9 @@ async function playNext(session) {
       "-f", "opus",
       "pipe:1"
     ]);
+
+    ffmpeg.stdin.write(audioBuffer);
+    ffmpeg.stdin.end();
 
     ffmpeg.stderr.on("data", (chunk) => {
       const text = chunk.toString().trim();
