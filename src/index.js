@@ -174,9 +174,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     await interaction.editReply(
-      `Da vao **${voiceChannel.name}**. Minh se doc tin nhan trong kenh nay.`
+      `Da vao **${voiceChannel.name}**. Mình sẽ đọc tin nhắn kênh này.`
     );
-    enqueue(session, "Bot da san sang doc tin nhan.");
+    enqueue(session, "Bot đã sẵng sàng đọc tin nhắn.");
   }
 
   if (interaction.commandName === "leave") {
@@ -186,13 +186,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
     const connection = session?.connection || getVoiceConnection(interaction.guild.id);
 
     if (!connection) {
-      await interaction.editReply("Bot dang khong o voice channel nao.");
+      await interaction.editReply("bot đang không ở chanel nào.");
       return;
     }
 
     connection.destroy();
     sessions.delete(interaction.guild.id);
-    await interaction.editReply("Da roi khoi voice channel.");
+    await interaction.editReply("Đã rời khỏi voice channel.");
   }
 });
 
@@ -212,13 +212,13 @@ client.on(Events.MessageCreate, (message) => {
   }
 
   const name = message.member?.displayName || message.author.username;
-  enqueue(session, `${name} noi: ${message.content}`);
+  enqueue(session, `${name} nói: ${message.content}`);
 });
 
 function enqueue(session, text) {
   const cleanText = text
     .replace(/https?:\/\/\S+/g, "link")
-    .replace(/<@!?(\d+)>/g, "ai do")
+    .replace(/<@!?(\d+)>/g, "ai đó")
     .replace(/<#(\d+)>/g, "mot kenh")
     .replace(/<a?:\w+:\d+>/g, "emoji")
     .replace(/\s+/g, " ")
@@ -256,6 +256,8 @@ async function playNext(session) {
       "-hide_banner",
       "-loglevel",
       "error",
+      "-user_agent",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
       "-i",
       url,
       "-f",
@@ -270,6 +272,14 @@ async function playNext(session) {
     ffmpeg.stderr.on("data", (chunk) => {
       const text = chunk.toString().trim();
       if (text) console.error("FFmpeg:", text);
+    });
+
+    ffmpeg.on("error", (err) => {
+      console.error("FFmpeg spawn error:", err);
+    });
+
+    ffmpeg.on("close", (code) => {
+      if (code !== 0) console.error(`FFmpeg exited with code ${code}`);
     });
 
     const resource = createAudioResource(ffmpeg.stdout, {
