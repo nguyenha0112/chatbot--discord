@@ -70,6 +70,10 @@ client.once(Events.ClientReady, async () => {
   }
 });
 
+client.on("error", (error) => {
+  console.error("Client error:", error);
+});
+
 client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand() || !interaction.guild) return;
 
@@ -271,33 +275,30 @@ async function playNext(session) {
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
       "-i",
       url,
-      "-f",
-      "s16le",
-      "-ar",
-      "48000",
-      "-ac",
-      "2",
+      "-c:a", "libopus",
+      "-b:a", "48k",
+      "-ac", "2",
+      "-ar", "48000",
+      "-f", "opus",
       "pipe:1"
     ]);
 
     ffmpeg.stderr.on("data", (chunk) => {
       const text = chunk.toString().trim();
-      if (text) console.error("FFmpeg:", text);
+      if (text) console.error("FFmpeg stderr:", text);
     });
 
     ffmpeg.on("error", (err) => {
       console.error("FFmpeg spawn error:", err);
     });
 
-    ffmpeg.on("close", (code) => {
-      if (code !== 0) console.error(`FFmpeg exited with code ${code}`);
+    ffmpeg.on("close", (code, signal) => {
+      if (code !== 0) console.error(`FFmpeg exited with code ${code}, signal ${signal}`);
     });
 
     const resource = createAudioResource(ffmpeg.stdout, {
-      inputType: StreamType.Raw,
-      inlineVolume: true
+      inputType: StreamType.OggOpus,
     });
-    resource.volume?.setVolume(1.4);
 
     session.player.play(resource);
     await entersState(session.player, AudioPlayerStatus.Idle, 30_000);
