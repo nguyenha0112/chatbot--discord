@@ -226,8 +226,7 @@ client.on(Events.MessageCreate, (message) => {
     return;
   }
 
-  const name = message.member?.displayName || message.author.username;
-  enqueue(session, `${name} nói: ${message.content}`);
+  enqueue(session, message.content);
 });
 
 function enqueue(session, text) {
@@ -274,6 +273,7 @@ async function playNext(session) {
       "-loglevel",
       "error",
       "-i", "pipe:0",
+      "-af", "atempo=1.2",
       "-c:a", "libopus",
       "-b:a", "48k",
       "-ac", "2",
