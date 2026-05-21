@@ -5,6 +5,7 @@ const {
   Client,
   Events,
   GatewayIntentBits,
+  PermissionsBitField,
   REST,
   Routes,
   SlashCommandBuilder
@@ -35,7 +36,13 @@ const commands = [
     .setDescription("Vao voice channel va doc tin nhan trong kenh hien tai bang tieng Viet."),
   new SlashCommandBuilder()
     .setName("leave")
-    .setDescription("Roi khoi voice channel.")
+    .setDescription("Roi khoi voice channel."),
+  new SlashCommandBuilder()
+    .setName("status")
+    .setDescription("Xem cac bot dang doc o voice channel nao."),
+  new SlashCommandBuilder()
+    .setName("leaveall")
+    .setDescription("Cho tat ca bot roi khoi voice channel trong server nay.")
 ].map((command) => command.toJSON());
 
 function getTokens() {
@@ -91,6 +98,18 @@ function clearSession(session) {
     globalActiveVoiceChannels.delete(session.voiceChannelId);
     sessions.delete(session.sessionKey);
   }
+}
+
+function getSessionKey(guildId, clientId) {
+  return `${guildId}_${clientId}`;
+}
+
+function getGuildSessions(guildId) {
+  return [...sessions.values()].filter((session) => session.guildId === guildId);
+}
+
+function hasManageServerPermission(member) {
+  return new PermissionsBitField(member.permissions).has(PermissionsBitField.Flags.ManageGuild);
 }
 
 function startBot(botConfig, botIndex) {
@@ -149,7 +168,8 @@ function startBot(botConfig, botIndex) {
         return;
       }
 
-      const sessionKey = `${interaction.guild.id}_${client.user.id}`;
+      const sessionKey = getSessionKey(interaction.guild.id, client.user.id);
+      const voiceGroup = client.user.id;
       const oldSession = sessions.get(sessionKey);
 
       // Check collision: if another bot is already in this channel, prevent joining
@@ -183,6 +203,7 @@ function startBot(botConfig, botIndex) {
         channelId: voiceChannel.id,
         guildId: interaction.guild.id,
         adapterCreator: interaction.guild.voiceAdapterCreator,
+        group: voiceGroup,
         selfDeaf: false,
         selfMute: false
       });
@@ -228,13 +249,15 @@ function startBot(botConfig, botIndex) {
       const session = {
         connection,
         player,
+        guildId: interaction.guild.id,
         voiceChannelId: voiceChannel.id,
         voiceChannelName: voiceChannel.name,
         textChannelId: interaction.channelId,
         queue: [],
         playing: false,
         clientTag: client.user.tag,
-        sessionKey: sessionKey,
+        sessionKey,
+        voiceGroup,
         idleTimeout: null
       };
 
@@ -267,9 +290,10 @@ function startBot(botConfig, botIndex) {
         return;
       }
 
-      const sessionKey = `${interaction.guild.id}_${client.user.id}`;
+      const sessionKey = getSessionKey(interaction.guild.id, client.user.id);
+      const voiceGroup = client.user.id;
       const session = sessions.get(sessionKey);
-      const connection = session?.connection || getVoiceConnection(interaction.guild.id);
+      const connection = session?.connection || getVoiceConnection(interaction.guild.id, voiceGroup);
 
       if (!connection) {
         await interaction.editReply("Bot dang khong o channel nao.");
@@ -280,12 +304,91 @@ function startBot(botConfig, botIndex) {
       connection.destroy();
       await interaction.editReply("Da roi khoi voice channel.");
     }
+
+    if (interaction.commandName === "status") {
+      try {
+        await interaction.deferReply({ ephemeral: true });
+      } catch (e) {
+        console.error("Loi deferReply:", e.message);
+        return;
+      }
+
+      const guildSessions = getGuildSessions(interaction.guild.id);
+      if (guildSessions.length === 0) {
+        await interaction.editReply("Hien khong co bot nao dang o voice channel.");
+        return;
+      }
+
+      const statusText = guildSessions
+        .map((session) => {
+          const state = session.connection.state.status;
+          const queueCount = session.queue.length;
+          return `- ${session.clientTag}: **${session.voiceChannelName}** | voice: ${state} | hang doi: ${queueCount}`;
+        })
+        .join("\n");
+
+      await interaction.editReply(statusText);
+    }
+
+    if (interaction.commandName === "leaveall") {
+      try {
+        await interaction.deferReply({ ephemeral: true });
+      } catch (e) {
+        console.error("Loi deferReply:", e.message);
+        return;
+      }
+
+      if (!hasManageServerPermission(interaction.member)) {
+        await interaction.editReply("Ban can quyen Manage Server de dung `/leaveall`.");
+        return;
+      }
+
+      const guildSessions = getGuildSessions(interaction.guild.id);
+      if (guildSessions.length === 0) {
+        await interaction.editReply("Khong co bot nao dang o voice channel.");
+        return;
+      }
+
+      for (const session of guildSessions) {
+        clearSession(session);
+        if (session.connection.state.status !== VoiceConnectionStatus.Destroyed) {
+          session.connection.destroy();
+        }
+      }
+
+      await interaction.editReply(`Da cho ${guildSessions.length} bot roi khoi voice channel.`);
+    }
+  });
+
+  client.on(Events.VoiceStateUpdate, (oldState, newState) => {
+    if (oldState.member?.id !== client.user.id) return;
+
+    const sessionKey = getSessionKey(oldState.guild.id, client.user.id);
+    const session = sessions.get(sessionKey);
+    if (!session) return;
+
+    if (!newState.channelId) {
+      console.log(`[${client.user.tag}] Bi dua/kick khoi voice, don session.`);
+      clearSession(session);
+      if (session.connection.state.status !== VoiceConnectionStatus.Destroyed) {
+        session.connection.destroy();
+      }
+      return;
+    }
+
+    if (newState.channelId !== session.voiceChannelId) {
+      globalActiveVoiceChannels.delete(session.voiceChannelId);
+      session.voiceChannelId = newState.channelId;
+      session.voiceChannelName = newState.channel?.name || "unknown";
+      globalActiveVoiceChannels.add(session.voiceChannelId);
+      console.log(`[${client.user.tag}] Bi chuyen sang voice channel ${session.voiceChannelName}.`);
+    }
   });
 
   client.on(Events.MessageCreate, (message) => {
     if (!message.guild || message.author.bot) return;
 
-    const sessionKey = `${message.guild.id}_${client.user.id}`;
+    const sessionKey = getSessionKey(message.guild.id, client.user.id);
     const session = sessions.get(sessionKey);
 
     if (!session) return;
@@ -331,9 +434,13 @@ async function playNext(session) {
   if (session.playing || session.queue.length === 0) return;
 
   if (session.connection.state.status !== VoiceConnectionStatus.Ready) {
-    console.error(`[${session.clientTag}] Voice chua Ready, bo qua hang doi doc.`);
-    session.queue.length = 0;
-    return;
+    try {
+      await entersState(session.connection, VoiceConnectionStatus.Ready, 15_000);
+    } catch (error) {
+      console.error(`[${session.clientTag}] Voice chua Ready sau khi doi reconnect, bo qua hang doi doc.`);
+      session.queue.length = 0;
+      return;
+    }
   }
 
   session.playing = true;
