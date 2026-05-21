@@ -1,4 +1,5 @@
 require("dotenv").config();
+require("node:dns").setDefaultResultOrder("ipv4first");
 
 const {
   Client,
@@ -73,7 +74,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand() || !interaction.guild) return;
 
   if (interaction.commandName === "join") {
-    await interaction.deferReply();
+    try {
+      await interaction.deferReply();
+    } catch (e) {
+      console.error("Loi deferReply:", e.message);
+      return;
+    }
 
     const voiceChannel = interaction.member.voice.channel;
 
@@ -180,7 +186,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   }
 
   if (interaction.commandName === "leave") {
-    await interaction.deferReply();
+    try {
+      await interaction.deferReply();
+    } catch (e) {
+      console.error("Loi deferReply:", e.message);
+      return;
+    }
 
     const session = sessions.get(interaction.guild.id);
     const connection = session?.connection || getVoiceConnection(interaction.guild.id);
