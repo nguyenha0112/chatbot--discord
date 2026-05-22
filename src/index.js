@@ -272,9 +272,9 @@ function startBot(botConfig, botIndex) {
       }
 
       await interaction.editReply(
-        `Da vao **${voiceChannel.name}**. Minh se doc tin nhan kenh nay.`
+        `Da vao **${voiceChannel.name}**. Mình sẽ đọc tin nhắn kênh này.`
       );
-      enqueue(session, "Bot da san sang doc tin nhan.", interaction.user.tag);
+      enqueue(session, "Bot dễ thương cu te đã sẵn sàng đọc tin nhắn.", interaction.user.tag);
     }
 
     if (interaction.commandName === "leave") {
@@ -351,7 +351,7 @@ function startBot(botConfig, botIndex) {
         }
       }
 
-      await interaction.editReply(`Da cho ${guildSessions.length} bot roi khoi voice channel.`);
+      await interaction.editReply(`Đã cho ${guildSessions.length} bot rời khoi voice channel.`);
     }
   });
 
@@ -432,7 +432,7 @@ async function playNext(session) {
     try {
       await entersState(session.connection, VoiceConnectionStatus.Ready, 15_000);
     } catch (error) {
-      console.error(`[${session.clientTag}] Voice chua Ready sau khi doi reconnect, bo qua hang doi doc.`);
+      console.error(`[${session.clientTag}] Voice chưa Ready sau khi doi reconnect, bỏ qua hàng đợi doc.`);
       session.queue.length = 0;
       return;
     }
@@ -491,7 +491,7 @@ async function playNext(session) {
     session.player.play(resource);
     await entersState(session.player, AudioPlayerStatus.Idle, 30_000);
   } catch (error) {
-    console.error(`[${authorTag}] Loi doc TTS:`, error);
+    console.error(`[${authorTag}] Lỗi đọc TTS:`, error);
   } finally {
     session.playing = false;
     void playNext(session);
