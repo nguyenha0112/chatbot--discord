@@ -195,7 +195,7 @@ function startBot(botConfig, botIndex) {
           `Bot da o san **${voiceChannel.name}**. Minh se doc tin nhan trong kenh nay.`
         );
         resetIdleTimeout(oldSession);
-        enqueue(oldSession, "Bot da chuyen sang doc kenh nay.");
+        enqueue(oldSession, "Bot da chuyen sang doc kenh nay.", interaction.user.tag);
         return;
       }
 
@@ -211,12 +211,11 @@ function startBot(botConfig, botIndex) {
       // Mark this channel as occupied globally
       globalActiveVoiceChannels.add(voiceChannel.id);
 
-      connection.on("stateChange", (oldState, newState) => {
+      connection.on("stateChange", (_oldState, newState) => {
         if (newState.status === VoiceConnectionStatus.Destroyed) {
             const currentSession = sessions.get(sessionKey);
             clearSession(currentSession);
         }
-        console.log(`[${client.user.tag}] Voice: ${oldState.status} -> ${newState.status}`);
       });
 
       connection.on("error", (error) => {
@@ -229,10 +228,6 @@ function startBot(botConfig, botIndex) {
         behaviors: {
           noSubscriber: NoSubscriberBehavior.Play
         }
-      });
-
-      player.on("stateChange", (oldState, newState) => {
-        console.log(`[${client.user.tag}] Audio: ${oldState.status} -> ${newState.status}`);
       });
 
       player.on("error", (error) => {
@@ -279,7 +274,7 @@ function startBot(botConfig, botIndex) {
       await interaction.editReply(
         `Da vao **${voiceChannel.name}**. Minh se doc tin nhan kenh nay.`
       );
-      enqueue(session, "Bot da san sang doc tin nhan.");
+      enqueue(session, "Bot da san sang doc tin nhan.", interaction.user.tag);
     }
 
     if (interaction.commandName === "leave") {
@@ -399,13 +394,13 @@ function startBot(botConfig, botIndex) {
       return;
     }
 
-    enqueue(session, message.content);
+    enqueue(session, message.content, message.author.tag);
   });
 
   client.login(token);
 }
 
-function enqueue(session, text) {
+function enqueue(session, text, authorTag = "Unknown user") {
   // RAM Protection: Limit queue length
   if (session.queue.length >= 10) {
     console.log(`[${session.clientTag}] Hang doi da day (>10), bo qua tin nhan de tranh qua tai RAM.`);
@@ -426,7 +421,7 @@ function enqueue(session, text) {
 
   if (!cleanText) return;
 
-  session.queue.push(cleanText);
+  session.queue.push({ text: cleanText, authorTag });
   void playNext(session);
 }
 
@@ -444,10 +439,12 @@ async function playNext(session) {
   }
 
   session.playing = true;
-  const text = session.queue.shift();
+  const item = session.queue.shift();
+  const text = item.text;
+  const authorTag = item.authorTag;
 
   try {
-    console.log(`[${session.clientTag}] Doc: ${text}`);
+    console.log(`[${authorTag}] Doc: ${text}`);
 
     const base64Audio = await googleTTS.getAudioBase64(text, {
       lang: "vi",
@@ -476,15 +473,15 @@ async function playNext(session) {
 
     ffmpeg.stderr.on("data", (chunk) => {
       const text = chunk.toString().trim();
-      if (text) console.error(`[${session.clientTag}] FFmpeg stderr:`, text);
+      if (text) console.error(`[${authorTag}] FFmpeg stderr:`, text);
     });
 
     ffmpeg.on("error", (err) => {
-      console.error(`[${session.clientTag}] FFmpeg spawn error:`, err);
+      console.error(`[${authorTag}] FFmpeg spawn error:`, err);
     });
 
     ffmpeg.on("close", (code, signal) => {
-      if (code !== 0) console.error(`[${session.clientTag}] FFmpeg exited with code ${code}, signal ${signal}`);
+      if (code !== 0) console.error(`[${authorTag}] FFmpeg exited with code ${code}, signal ${signal}`);
     });
 
     const resource = createAudioResource(ffmpeg.stdout, {
@@ -494,7 +491,7 @@ async function playNext(session) {
     session.player.play(resource);
     await entersState(session.player, AudioPlayerStatus.Idle, 30_000);
   } catch (error) {
-    console.error(`[${session.clientTag}] Loi doc TTS:`, error);
+    console.error(`[${authorTag}] Loi doc TTS:`, error);
   } finally {
     session.playing = false;
     void playNext(session);
