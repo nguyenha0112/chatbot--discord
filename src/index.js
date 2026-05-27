@@ -22,6 +22,7 @@ const {
   joinVoiceChannel
 } = require("@discordjs/voice");
 const googleTTS = require("google-tts-api");
+const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts");
 const { spawn } = require("node:child_process");
 const http = require("node:http");
 const ffmpegPath = require("ffmpeg-static");
@@ -103,9 +104,20 @@ function clearSession(session) {
     if (session.idleTimeout) {
       clearTimeout(session.idleTimeout);
     }
+    if (session.ttsRetryTimeout) {
+      clearTimeout(session.ttsRetryTimeout);
+    }
     globalActiveVoiceChannels.delete(session.voiceChannelId);
     sessions.delete(session.sessionKey);
   }
+}
+
+function logDeferReplyError(error) {
+  if (error?.code === 10062 || error?.message === "Unknown interaction") {
+    console.warn("Bo qua interaction da het han/da duoc xu ly boi process khac.");
+    return;
+  }
+  console.error("Loi deferReply:", error.message);
 }
 
 function getSessionKey(guildId, clientId) {
@@ -158,7 +170,7 @@ function startBot(botConfig, botIndex) {
       try {
         await interaction.deferReply();
       } catch (e) {
-        console.error("Loi deferReply:", e.message);
+        logDeferReplyError(e);
         return;
       }
 
@@ -261,7 +273,8 @@ function startBot(botConfig, botIndex) {
         clientTag: client.user.tag,
         sessionKey,
         voiceGroup,
-        idleTimeout: null
+        idleTimeout: null,
+        ttsRetryTimeout: null
       };
 
       sessions.set(sessionKey, session);
@@ -289,7 +302,7 @@ function startBot(botConfig, botIndex) {
       try {
         await interaction.deferReply();
       } catch (e) {
-        console.error("Loi deferReply:", e.message);
+        logDeferReplyError(e);
         return;
       }
 
@@ -312,7 +325,7 @@ function startBot(botConfig, botIndex) {
       try {
         await interaction.deferReply({ ephemeral: true });
       } catch (e) {
-        console.error("Loi deferReply:", e.message);
+        logDeferReplyError(e);
         return;
       }
 
@@ -337,7 +350,7 @@ function startBot(botConfig, botIndex) {
       try {
         await interaction.deferReply({ ephemeral: true });
       } catch (e) {
-        console.error("Loi deferReply:", e.message);
+        logDeferReplyError(e);
         return;
       }
 
@@ -463,8 +476,20 @@ function rememberTtsCache(key, audioBuffer) {
   }
 }
 
+async function synthesizeSpeechEdge(text) {
+  const tts = new MsEdgeTTS();
+  await tts.setMetadata("vi-VN-HoaiMyNeural", OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    const { audioStream } = tts.toStream(text);
+    audioStream.on("data", (chunk) => chunks.push(chunk));
+    audioStream.on("end", () => resolve(Buffer.concat(chunks)));
+    audioStream.on("error", reject);
+  });
+}
+
 async function synthesizeSpeech(text) {
-  const cacheKey = `vi:false:${text}`;
+  const cacheKey = `vi:edge:${text}`;
   const cachedAudio = ttsCache.get(cacheKey);
   if (cachedAudio) {
     ttsCache.delete(cacheKey);
@@ -472,10 +497,22 @@ async function synthesizeSpeech(text) {
     return cachedAudio;
   }
 
+  // Try Edge TTS first (no rate-limit)
+  try {
+    const audioBuffer = await synthesizeSpeechEdge(text);
+    rememberTtsCache(cacheKey, audioBuffer);
+    return audioBuffer;
+  } catch (edgeError) {
+    console.error(`[TTS] Edge TTS failed: ${edgeError.message}, thu Google TTS...`);
+  }
+
+  // Fallback to Google TTS
   const now = Date.now();
   if (now < ttsBlockedUntil) {
     const waitSeconds = Math.ceil((ttsBlockedUntil - now) / 1000);
-    throw new Error(`Google TTS dang bi rate-limit, thu lai sau ${waitSeconds}s`);
+    const error = new Error(`Google TTS dang bi rate-limit, thu lai sau ${waitSeconds}s`);
+    error.retryAfterMs = ttsBlockedUntil - now;
+    throw error;
   }
 
   let lastError;
@@ -496,6 +533,7 @@ async function synthesizeSpeech(text) {
       console.error(`[TTS] ${host} failed: ${getTtsErrorMessage(error)}`);
       if (status === 429) {
         ttsBlockedUntil = Date.now() + ttsCooldownMs;
+        error.retryAfterMs = ttsCooldownMs;
         break;
       }
       await delay(500);
@@ -566,9 +604,20 @@ async function playNext(session) {
     await entersState(session.player, AudioPlayerStatus.Idle, 30_000);
   } catch (error) {
     console.error(`[${authorTag}] Loi doc TTS: ${getTtsErrorMessage(error) || error.message}`);
+    if (error?.retryAfterMs) {
+      session.queue.unshift(item);
+      if (!session.ttsRetryTimeout) {
+        session.ttsRetryTimeout = setTimeout(() => {
+          session.ttsRetryTimeout = null;
+          void playNext(session);
+        }, error.retryAfterMs + 1000);
+      }
+    }
   } finally {
     session.playing = false;
-    void playNext(session);
+    if (!session.ttsRetryTimeout) {
+      void playNext(session);
+    }
   }
 }
 
