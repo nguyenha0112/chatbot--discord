@@ -29,6 +29,14 @@ const ffmpegPath = require("ffmpeg-static");
 // Global states
 const sessions = new Map(); 
 const globalActiveVoiceChannels = new Set(); // Stores voiceChannel.id to prevent collision
+const ttsCache = new Map();
+const ttsHosts = (process.env.TTS_HOSTS || "https://translate.google.com,https://translate.google.com.vn")
+  .split(",")
+  .map((host) => host.trim())
+  .filter(Boolean);
+const maxTtsCacheItems = Number.parseInt(process.env.TTS_CACHE_ITEMS || "100", 10);
+const ttsCooldownMs = Number.parseInt(process.env.TTS_COOLDOWN_MS || "120000", 10);
+let ttsBlockedUntil = 0;
 
 const commands = [
   new SlashCommandBuilder()
@@ -425,6 +433,78 @@ function enqueue(session, text, authorTag = "Unknown user") {
   void playNext(session);
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getTtsErrorStatus(error) {
+  return error?.response?.status || error?.status || null;
+}
+
+function getTtsErrorMessage(error) {
+  const status = getTtsErrorStatus(error);
+  return [
+    status ? `HTTP ${status}` : null,
+    error?.response?.statusText,
+    error?.code,
+    error?.message
+  ].filter(Boolean).join(" - ");
+}
+
+function rememberTtsCache(key, audioBuffer) {
+  if (maxTtsCacheItems <= 0) return;
+  if (ttsCache.has(key)) {
+    ttsCache.delete(key);
+  }
+  ttsCache.set(key, audioBuffer);
+  while (ttsCache.size > maxTtsCacheItems) {
+    const oldestKey = ttsCache.keys().next().value;
+    ttsCache.delete(oldestKey);
+  }
+}
+
+async function synthesizeSpeech(text) {
+  const cacheKey = `vi:false:${text}`;
+  const cachedAudio = ttsCache.get(cacheKey);
+  if (cachedAudio) {
+    ttsCache.delete(cacheKey);
+    ttsCache.set(cacheKey, cachedAudio);
+    return cachedAudio;
+  }
+
+  const now = Date.now();
+  if (now < ttsBlockedUntil) {
+    const waitSeconds = Math.ceil((ttsBlockedUntil - now) / 1000);
+    throw new Error(`Google TTS dang bi rate-limit, thu lai sau ${waitSeconds}s`);
+  }
+
+  let lastError;
+  for (const host of ttsHosts) {
+    try {
+      const base64Audio = await googleTTS.getAudioBase64(text, {
+        lang: "vi",
+        slow: false,
+        host,
+        timeout: 10000
+      });
+      const audioBuffer = Buffer.from(base64Audio, "base64");
+      rememberTtsCache(cacheKey, audioBuffer);
+      return audioBuffer;
+    } catch (error) {
+      lastError = error;
+      const status = getTtsErrorStatus(error);
+      console.error(`[TTS] ${host} failed: ${getTtsErrorMessage(error)}`);
+      if (status === 429) {
+        ttsBlockedUntil = Date.now() + ttsCooldownMs;
+        break;
+      }
+      await delay(500);
+    }
+  }
+
+  throw lastError || new Error("Khong tao duoc audio TTS");
+}
+
 async function playNext(session) {
   if (session.playing || session.queue.length === 0) return;
 
@@ -446,13 +526,7 @@ async function playNext(session) {
   try {
     console.log(`[${authorTag}] Doc: ${text}`);
 
-    const base64Audio = await googleTTS.getAudioBase64(text, {
-      lang: "vi",
-      slow: false,
-      host: "https://translate.google.com"
-    });
-    
-    const audioBuffer = Buffer.from(base64Audio, "base64");
+    const audioBuffer = await synthesizeSpeech(text);
 
     const ffmpeg = spawn(ffmpegPath, [
       "-hide_banner",
@@ -491,7 +565,7 @@ async function playNext(session) {
     session.player.play(resource);
     await entersState(session.player, AudioPlayerStatus.Idle, 30_000);
   } catch (error) {
-    console.error(`[${authorTag}] Lỗi đọc TTS:`, error);
+    console.error(`[${authorTag}] Loi doc TTS: ${getTtsErrorMessage(error) || error.message}`);
   } finally {
     session.playing = false;
     void playNext(session);

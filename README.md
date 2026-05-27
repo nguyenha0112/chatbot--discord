@@ -19,7 +19,14 @@ Tao file `.env`:
 ```env
 DISCORD_TOKEN=token_bot_cua_ban
 DISCORD_CLIENT_ID=client_id_cua_bot
+TTS_HOSTS=https://translate.google.com,https://translate.google.com.vn
+TTS_CACHE_ITEMS=100
+TTS_COOLDOWN_MS=120000
 ```
+
+`google-tts-api` dung endpoint khong chinh thuc cua Google Translate, nen co the bi Google tra ve `429 Too Many Requests`.
+Bot se cache cac cau gan day va tam dung TTS trong `TTS_COOLDOWN_MS` khi bi 429 de tranh spam request.
+Neu van bi chan thuong xuyen, nen doi sang TTS provider co API chinh thuc nhu Google Cloud Text-to-Speech, Azure Speech, Amazon Polly hoac ElevenLabs.
 
 Chay bot:
 
