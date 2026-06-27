@@ -22,7 +22,10 @@ DISCORD_CLIENT_ID=client_id_cua_bot
 TTS_HOSTS=https://translate.google.com,https://translate.google.com.vn
 TTS_CACHE_ITEMS=100
 TTS_COOLDOWN_MS=120000
+TTS_SPEED=0.92
 ```
+
+`TTS_SPEED` dieu chinh toc do doc. `1.0` la mac dinh binh thuong, nho hon `1.0` la cham hon, lon hon `1.0` la nhanh hon.
 
 `google-tts-api` dung endpoint khong chinh thuc cua Google Translate, nen co the bi Google tra ve `429 Too Many Requests`.
 Bot se cache cac cau gan day va tam dung TTS trong `TTS_COOLDOWN_MS` khi bi 429 de tranh spam request.

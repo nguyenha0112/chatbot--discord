@@ -37,6 +37,10 @@ const ttsHosts = (process.env.TTS_HOSTS || "https://translate.google.com,https:/
   .filter(Boolean);
 const maxTtsCacheItems = Number.parseInt(process.env.TTS_CACHE_ITEMS || "100", 10);
 const ttsCooldownMs = Number.parseInt(process.env.TTS_COOLDOWN_MS || "120000", 10);
+const ttsSpeed = Math.min(
+  2,
+  Math.max(0.5, Number.parseFloat(process.env.TTS_SPEED || "0.92") || 0.92)
+);
 let ttsBlockedUntil = 0;
 
 const commands = [
@@ -571,7 +575,7 @@ async function playNext(session) {
       "-loglevel",
       "error",
       "-i", "pipe:0",
-      "-af", "atempo=1.2",
+      "-af", `atempo=${ttsSpeed}`,
       "-c:a", "libopus",
       "-b:a", "48k",
       "-ac", "2",
