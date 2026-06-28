@@ -91,6 +91,13 @@ function getTokens() {
     });
   }
   
+  tokens.sort((a, b) => (a.clientId || "").localeCompare(b.clientId || ""));
+
+  const botLimit = Number.parseInt(process.env.BOT_LIMIT || "0", 10);
+  if (Number.isInteger(botLimit) && botLimit > 0) {
+    return tokens.slice(0, botLimit);
+  }
+
   return tokens;
 }
 
