@@ -157,6 +157,28 @@ function sanitizeDebugMessage(message) {
     .replace(/(authorization["']?\s*[:=]\s*["']?)Bot\s+[A-Za-z0-9._-]+/gi, "$1Bot [redacted]");
 }
 
+function getTokenFingerprint(token) {
+  if (!token) return "missing";
+  if (token.length <= 10) return "[short-token]";
+  return `${token.slice(0, 6)}...${token.slice(-4)}`;
+}
+
+async function verifyBotIdentity(token, botIndex) {
+  try {
+    const rest = new REST({ version: "10" }).setToken(token);
+    const me = await rest.get(Routes.user("@me"));
+    console.log(
+      `[Bot ${botIndex}] REST /users/@me ok: username=${me.username} id=${me.id}`
+    );
+    return me;
+  } catch (error) {
+    console.error(
+      `[Bot ${botIndex}] REST /users/@me that bai: ${error?.status || error?.code || "unknown"} ${error?.message || error}`
+    );
+    throw error;
+  }
+}
+
 function startBot(botConfig, botIndex) {
   const { token, clientId } = botConfig;
   const client = new Client({
@@ -171,6 +193,12 @@ function startBot(botConfig, botIndex) {
   let lastInteractionAt = null;
   let readyLogged = false;
   const loginStartedAt = Date.now();
+  let identityCheckDone = false;
+
+  console.log(
+    `[Bot ${botIndex}] Boot: clientId=${clientId || "missing"} token=${getTokenFingerprint(token)}`
+  );
+
   const loginWatchdog = setInterval(() => {
     if (readyLogged) {
       clearInterval(loginWatchdog);
@@ -181,7 +209,35 @@ function startBot(botConfig, botIndex) {
     console.warn(
       `[Bot ${botIndex}] Chua ready sau ${elapsedSeconds}s. ws=${client.ws.status} guilds=${client.guilds.cache.size}`
     );
+
+    if (!identityCheckDone && elapsedSeconds >= 15) {
+      identityCheckDone = true;
+      void verifyBotIdentity(token, botIndex).catch(() => {});
+    }
   }, 30_000);
+
+  client.ws.on("debug", (message) => {
+    const safe = sanitizeDebugMessage(message);
+    if (
+      safe.includes("Heartbeat acknowledged") ||
+      safe.includes("Sending a heartbeat") ||
+      safe.includes("Hit a 429") ||
+      safe.includes("Provided token:")
+    ) {
+      return;
+    }
+    console.log(`[Bot ${botIndex}] WS Debug: ${safe}`);
+  });
+
+  client.ws.on("close", (event) => {
+    console.warn(
+      `[Bot ${botIndex}] WS close: code=${event?.code} reason=${event?.reason || "unknown"}`
+    );
+  });
+
+  client.ws.on("open", () => {
+    console.log(`[Bot ${botIndex}] WS open`);
+  });
 
   client.once(Events.ClientReady, async () => {
     readyLogged = true;
@@ -202,17 +258,18 @@ function startBot(botConfig, botIndex) {
   });
 
   client.on(Events.Debug, (message) => {
+    const safe = sanitizeDebugMessage(message);
     if (
-      message.includes("Heartbeat acknowledged") ||
-      message.includes("Sending a heartbeat") ||
-      message.includes("Hit a 429") ||
-      message.includes("Provided token:")
+      safe.includes("Heartbeat acknowledged") ||
+      safe.includes("Sending a heartbeat") ||
+      safe.includes("Hit a 429") ||
+      safe.includes("Provided token:")
     ) {
       return;
     }
 
     console.log(
-      `[${client.user?.tag || `Bot ${botIndex}`}] Debug: ${sanitizeDebugMessage(message)}`
+      `[${client.user?.tag || `Bot ${botIndex}`}] Debug: ${safe}`
     );
   });
 
@@ -509,10 +566,17 @@ function startBot(botConfig, botIndex) {
     );
   }, 5 * 60 * 1000);
 
-  client.login(token).catch((error) => {
-    clearInterval(loginWatchdog);
-    console.error(`[Bot ${botIndex}] Login that bai:`, error);
-  });
+  const loginPromise = client.login(token);
+  loginPromise
+    .then((result) => {
+      console.log(
+        `[Bot ${botIndex}] client.login() resolve: ${typeof result === "string" ? getTokenFingerprint(result) : String(result)}`
+      );
+    })
+    .catch((error) => {
+      clearInterval(loginWatchdog);
+      console.error(`[Bot ${botIndex}] Login that bai:`, error);
+    });
 }
 
 function enqueue(session, text, authorTag = "Unknown user") {
