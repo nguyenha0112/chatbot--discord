@@ -25,6 +25,7 @@ const googleTTS = require("google-tts-api");
 const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts");
 const { spawn } = require("node:child_process");
 const http = require("node:http");
+const https = require("node:https");
 const ffmpegPath = require("ffmpeg-static");
 
 // Global states
@@ -179,6 +180,58 @@ async function verifyBotIdentity(token, botIndex) {
   }
 }
 
+function probeUrl(url, options = {}) {
+  const { headers = {}, timeoutMs = 10_000 } = options;
+
+  return new Promise((resolve, reject) => {
+    const request = https.get(url, { headers }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => {
+        resolve({
+          statusCode: response.statusCode,
+          statusMessage: response.statusMessage,
+          body: Buffer.concat(chunks).toString("utf8")
+        });
+      });
+    });
+
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new Error(`Request timeout after ${timeoutMs}ms`));
+    });
+
+    request.on("error", reject);
+  });
+}
+
+async function probeDiscordNetwork(token, botIndex) {
+  try {
+    const gatewayResponse = await probeUrl("https://discord.com/api/v10/gateway", {
+      timeoutMs: 10_000
+    });
+    console.log(
+      `[Bot ${botIndex}] Probe gateway ok: HTTP ${gatewayResponse.statusCode} ${gatewayResponse.statusMessage}`
+    );
+  } catch (error) {
+    console.error(`[Bot ${botIndex}] Probe gateway that bai: ${error.message}`);
+  }
+
+  try {
+    const meResponse = await probeUrl("https://discord.com/api/v10/users/@me", {
+      timeoutMs: 10_000,
+      headers: {
+        Authorization: `Bot ${token}`,
+        "User-Agent": "discord-tts-bot-diagnostic/1.0"
+      }
+    });
+    console.log(
+      `[Bot ${botIndex}] Probe users/@me: HTTP ${meResponse.statusCode} ${meResponse.statusMessage}`
+    );
+  } catch (error) {
+    console.error(`[Bot ${botIndex}] Probe users/@me that bai: ${error.message}`);
+  }
+}
+
 function startBot(botConfig, botIndex) {
   const { token, clientId } = botConfig;
   const client = new Client({
@@ -198,6 +251,7 @@ function startBot(botConfig, botIndex) {
   console.log(
     `[Bot ${botIndex}] Boot: clientId=${clientId || "missing"} token=${getTokenFingerprint(token)}`
   );
+  void probeDiscordNetwork(token, botIndex);
 
   const loginWatchdog = setInterval(() => {
     if (readyLogged) {
