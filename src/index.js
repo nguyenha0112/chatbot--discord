@@ -43,6 +43,18 @@ const ttsSpeed = Math.min(
 );
 let ttsBlockedUntil = 0;
 
+process.on("unhandledRejection", (reason) => {
+  console.error("[Process] Unhandled promise rejection:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("[Process] Uncaught exception:", error);
+});
+
+process.on("warning", (warning) => {
+  console.warn("[Process] Warning:", warning);
+});
+
 const commands = [
   new SlashCommandBuilder()
     .setName("join")
@@ -147,6 +159,8 @@ function startBot(botConfig, botIndex) {
     ]
   });
 
+  let lastInteractionAt = null;
+
   client.once(Events.ClientReady, async () => {
     console.log(`[Bot ${botIndex}] Da dang nhap: ${client.user.tag}`);
 
@@ -163,12 +177,48 @@ function startBot(botConfig, botIndex) {
     }
   });
 
+  client.on(Events.Debug, (message) => {
+    if (
+      message.includes("Heartbeat acknowledged") ||
+      message.includes("Sending a heartbeat") ||
+      message.includes("Hit a 429")
+    ) {
+      return;
+    }
+    console.log(`[${client.user?.tag || `Bot ${botIndex}`}] Debug: ${message}`);
+  });
+
+  client.on(Events.ShardDisconnect, (event, shardId) => {
+    console.warn(
+      `[${client.user?.tag || `Bot ${botIndex}`}] Shard ${shardId} disconnect. Code=${event.code} Reason=${event.reason || "unknown"}`
+    );
+  });
+
+  client.on(Events.ShardError, (error, shardId) => {
+    console.error(`[${client.user?.tag || `Bot ${botIndex}`}] Shard ${shardId} error:`, error);
+  });
+
+  client.on(Events.ShardReconnecting, (shardId) => {
+    console.warn(`[${client.user?.tag || `Bot ${botIndex}`}] Shard ${shardId} dang reconnect...`);
+  });
+
+  client.on(Events.ShardResume, (shardId, replayedEvents) => {
+    console.log(
+      `[${client.user?.tag || `Bot ${botIndex}`}] Shard ${shardId} resume thanh cong, replayed=${replayedEvents}`
+    );
+  });
+
   client.on("error", (error) => {
     console.error(`[${client.user?.tag || "Bot"}] Client error:`, error);
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
     if (!interaction.isChatInputCommand() || !interaction.guild) return;
+    lastInteractionAt = new Date();
+    console.log(
+      `[${client.user?.tag || `Bot ${botIndex}`}] Interaction /${interaction.commandName} tu ${interaction.user.tag} ` +
+      `guild=${interaction.guild.id} channel=${interaction.channelId}`
+    );
 
     if (interaction.commandName === "join") {
       try {
@@ -422,7 +472,18 @@ function startBot(botConfig, botIndex) {
     enqueue(session, message.content, message.author.tag);
   });
 
-  client.login(token);
+  setInterval(() => {
+    const readyState = client.isReady() ? "ready" : "not-ready";
+    const wsStatus = client.ws.status;
+    const lastInteractionText = lastInteractionAt ? lastInteractionAt.toISOString() : "never";
+    console.log(
+      `[${client.user?.tag || `Bot ${botIndex}`}] Heartbeat status=${readyState} ws=${wsStatus} sessions=${sessions.size} lastInteraction=${lastInteractionText}`
+    );
+  }, 5 * 60 * 1000);
+
+  client.login(token).catch((error) => {
+    console.error(`[Bot ${botIndex}] Login that bai:`, error);
+  });
 }
 
 function enqueue(session, text, authorTag = "Unknown user") {
