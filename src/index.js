@@ -148,6 +148,15 @@ function hasManageServerPermission(member) {
   return new PermissionsBitField(member.permissions).has(PermissionsBitField.Flags.ManageGuild);
 }
 
+function sanitizeDebugMessage(message) {
+  if (!message) return message;
+
+  return message
+    .replace(/(Provided token:\s*)\S+/i, "$1[redacted]")
+    .replace(/(Using token:\s*)\S+/i, "$1[redacted]")
+    .replace(/(authorization["']?\s*[:=]\s*["']?)Bot\s+[A-Za-z0-9._-]+/gi, "$1Bot [redacted]");
+}
+
 function startBot(botConfig, botIndex) {
   const { token, clientId } = botConfig;
   const client = new Client({
@@ -160,8 +169,23 @@ function startBot(botConfig, botIndex) {
   });
 
   let lastInteractionAt = null;
+  let readyLogged = false;
+  const loginStartedAt = Date.now();
+  const loginWatchdog = setInterval(() => {
+    if (readyLogged) {
+      clearInterval(loginWatchdog);
+      return;
+    }
+
+    const elapsedSeconds = Math.floor((Date.now() - loginStartedAt) / 1000);
+    console.warn(
+      `[Bot ${botIndex}] Chua ready sau ${elapsedSeconds}s. ws=${client.ws.status} guilds=${client.guilds.cache.size}`
+    );
+  }, 30_000);
 
   client.once(Events.ClientReady, async () => {
+    readyLogged = true;
+    clearInterval(loginWatchdog);
     console.log(`[Bot ${botIndex}] Da dang nhap: ${client.user.tag}`);
 
     try {
@@ -181,11 +205,15 @@ function startBot(botConfig, botIndex) {
     if (
       message.includes("Heartbeat acknowledged") ||
       message.includes("Sending a heartbeat") ||
-      message.includes("Hit a 429")
+      message.includes("Hit a 429") ||
+      message.includes("Provided token:")
     ) {
       return;
     }
-    console.log(`[${client.user?.tag || `Bot ${botIndex}`}] Debug: ${message}`);
+
+    console.log(
+      `[${client.user?.tag || `Bot ${botIndex}`}] Debug: ${sanitizeDebugMessage(message)}`
+    );
   });
 
   client.on(Events.ShardDisconnect, (event, shardId) => {
@@ -482,6 +510,7 @@ function startBot(botConfig, botIndex) {
   }, 5 * 60 * 1000);
 
   client.login(token).catch((error) => {
+    clearInterval(loginWatchdog);
     console.error(`[Bot ${botIndex}] Login that bai:`, error);
   });
 }
